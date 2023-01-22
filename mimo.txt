@@ -1,0 +1,299 @@
+openMP
+#include <iostream>
+#include <omp.h>
+int main()
+{
+ //std::cout << "Hello World!\n";
+ int allSum = 0;
+ int rez[10];
+ int count = 0;
+ #pragma omp parallel num_threads(10) reduction(+:allSum)
+ {
+ int threadNum = omp_get_thread_num();
+ int sum = threadNum * threadNum + threadNum *threadNum* threadNum;
+ allSum += sum;
+ #pragma omp critical
+ {
+ rez[count] = sum;
+ count++;
+ std::cout << "thread: " << threadNum<<" i^2 + i^3 = " <<sum<< '\n';
+ }
+ }
+ for (int i = 0; i < 10; i++)
+ {
+ std::cout << "row: " << i << " rezult " << rez[i] << '\n';
+ }
+ std::cout << "suma: " << allSum <<'\n';
+}
+
+#include <iostream>
+#include <omp.h>
+int main()
+{
+ std::cout << "Hello World!\n";
+ int numbers[1000];
+float rez[10];
+int count = 0;
+int sumTotal = 0;
+for (int i = 0; i < 1000; i++)
+{
+numbers[i] = i;
+//std::cout << "added: "<<numbers[i] <<'\n';
+}
+#pragma omp parallel num_threads(10) reduction(+:sumTotal)
+{
+int threadNum = omp_get_thread_num();
+int start = threadNum * 100;
+int end = start + 99;
+float sum = 0;
+float sumCount = 0;
+for (int i = start; i < end+1; i++)
+{
+sum += numbers[i];
+sumCount++;
+}
+float avg = sum / sumCount;
+sumTotal += sum;
+#pragma omp critical
+{
+rez[count] = avg;
+count++;
+std::cout << "thread: " << threadNum << " sum: " << sum << " count: " << sumCount << "
+avg: " << avg << '\n';
+//std::cout << "thread: " << omp_get_thread_num()<<" start: "<<start<<" end: "<<end << '\n';
+}
+}
+for (int i = 0; i < 10; i++)
+{
+std::cout << "rezult "<<i<<": "<<rez[i]<<'\n';
+}
+std::cout << "sumu suma: " << sumTotal << '\n';
+}
+
+go
+
+package main
+import (
+ "fmt"
+)
+func main() {
+ var numbers [1000]int
+ rezultCh := make(chan float64)
+ sumCh := make(chan int)
+ sumRez := make(chan int)
+ var rez [10]float64
+ for i := 0; i < 1000; i++ {
+ numbers[i] = i
+ }
+ for i := 0; i < 10; i++ {
+ go Avg(i, numbers, rezultCh, sumCh)
+ }
+ go Sum(sumCh, sumRez)
+ sumAll := <-sumRez
+ for i := 0; i < 10; i++ {
+ rez[i] = <-rezultCh
+ }
+ close(rezultCh)
+ fmt.Println("Vidurkiai: ")
+ fmt.Println(rez)
+ fmt.Println("visko suma: ")
+ fmt.Println(sumAll)
+}
+func Avg(row int, numbers [1000]int, rezultCh chan float64, sumCh chan int) {
+ sum := 0.0
+ count := 0.0
+ start := row * 100
+ end := start + 99
+ for i := start; i < end+1; i++ {
+ sum += float64(numbers[i])
+ count++
+ }
+ sumCh <- int(sum)
+ avg := sum / count
+ rezultCh <- avg
+}
+func Sum(sumCh chan int, sumRez chan int) {
+ sumAll := 0
+ for i := 0; i < 10; i++ {
+ sum := <-sumCh
+ sumAll += sum
+ }
+ sumRez <- sumAll
+ close(sumCh)
+ close(sumRez)
+
+cuda
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <iostream>
+#include <stdio.h>
+cudaError_t findPrimeCuda(int* prime, int primeCount, const int* dataNum, int size);
+__global__ void findPrime(int* prime, int* primeCount, const int* numbers)
+{
+ int id = threadIdx.x;
+ int start = id * 40;
+ int end = start + 39;
+ //printf("gija:%d \n", id);
+ for (int i = start; i < end; i++)
+ {
+ //printf("Rezultatai:%d \n",i);
+ int num = numbers[i];
+ bool isPrime = true;
+ for (int j = 2; j < num/2; j++)
+ {
+ if (num%j == 0)
+ {
+ isPrime = false;
+ break;
+ }
+ }
+ if (isPrime == true)
+ {
+ //printf("prime:%d \n", num);
+ int loc = atomicAdd(primeCount, 1);
+ prime[loc] = num;
+ }
+ }
+}
+int main()
+{
+ const int arraySize = 5;
+ const int a[arraySize] = { 1, 2, 3, 4, 5 };
+ const int b[arraySize] = { 10, 20, 30, 40, 50 };
+ int c[arraySize] = { 0 };
+ int dataNum[1000] = { 0 };
+ int prime[1000] = { 0 };
+ int primeCount = 0;
+ for (int i = 1000; i <= 1999; i++)
+ {
+ dataNum[i-1000] = i;
+ }
+ //cudaError_t cudaStatus = findPrimeCuda(prime, primeCount, dataNum, 1000);
+ int* dev_primeCount = 0;
+ int* dev_dataNum = 0;
+ int* dev_prime = 0;
+ int size = 1000;
+ cudaError_t cudaStatus;
+ // Choose which GPU to run on, change this on a multi-GPU system.
+ cudaStatus = cudaSetDevice(0);
+ // Allocate GPU buffers for three vectors (two input, one output) .
+ cudaStatus = cudaMalloc((void**)&dev_prime, size * sizeof(int));
+ cudaStatus = cudaMalloc((void**)&dev_primeCount, sizeof(int));
+ cudaStatus = cudaMalloc((void**)&dev_dataNum, size * sizeof(int));
+ // Copy input vectors from host memory to GPU buffers.
+ cudaStatus = cudaMemcpy(dev_primeCount, &primeCount, sizeof(int), cudaMemcpyHostToDevice);
+ cudaStatus = cudaMemcpy(dev_dataNum, dataNum, size * sizeof(int), cudaMemcpyHostToDevice);
+ // Launch a kernel on the GPU with one thread for each element.
+ findPrime << <1, 25 >> > (dev_prime, dev_primeCount, dev_dataNum);
+ // Check for any errors launching the kernel
+ cudaStatus = cudaGetLastError();
+ // cudaDeviceSynchronize waits for the kernel to finish, and returns
+ // any errors encountered during the launch.
+ cudaStatus = cudaDeviceSynchronize();
+ // Copy output vector from GPU buffer to host memory.
+ cudaStatus = cudaMemcpy(&primeCount, dev_primeCount, sizeof(int), cudaMemcpyDeviceToHost);
+ cudaStatus = cudaMemcpy(prime, dev_prime, size * sizeof(int), cudaMemcpyDeviceToHost);
+ std::cout<<"Pirminių skaičių yra: " << primeCount << '\n';
+ for (int i = 0; i < primeCount; i++)
+ {
+ std::cout << prime[i] << '\n';
+ }
+ // Add vectors in parallel.
+ //cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
+ /*printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
+ c[0], c[1], c[2], c[3], c[4]);*/
+ // cudaDeviceReset must be called before exiting in order for profiling and
+ // tracing tools such as Nsight and Visual Profiler to show complete traces.
+ cudaStatus = cudaDeviceReset();
+ return 0;
+}
+
+c#
+
+using static System.Formats.Asn1.AsnWriter;
+namespace pasiruosimas {
+ class Program {
+ public static List<Thread> threads;
+ public static Stack stack;
+ public static int cycles = 5;
+ public static int numTh = 10;
+ public static int done = 0;
+ static void Main(string[] args)
+ {
+ threads= new List<Thread>();
+ stack= new Stack();
+ CreateThreds();
+ while (done < numTh){}
+ JoinThreds();
+ Console.WriteLine("Baigta");
+ }
+ public static void CreateThreds() {
+ Thread t2 = new Thread(Print);
+ threads.Add(t2);
+ for (int i = 0; i < numTh; i++)
+ {
+ int iCopy = i;
+ Thread t = new Thread(() => Write(iCopy));
+ threads.Add(t);
+ }
+ foreach (var th in threads)
+ {
+ th.Start();
+ }
+ }
+ public static void JoinThreds()
+ {
+ foreach (var th in threads)
+ {
+ th.Join();
+ }
+ }
+ public static void Write(int number) {
+ for (int i = 0; i < cycles; i++)
+ {
+ stack.Push(number);
+
+ }
+ done++;
+ }
+ public static void Print()
+ {
+ while (done < numTh)
+ {
+ Console.WriteLine(stack.Max());
+ }
+ Console.WriteLine(stack.Max());
+ }
+ }
+ class Stack {
+ private static object _locker;
+ private int[] stack;
+ private int amount;
+ private int max;
+ public Stack()
+ {
+ _locker= new object();
+ stack = new int[51];
+ amount = 0;
+ max = 0;
+ }
+ public void Push(int newNumber)
+ {
+ lock (_locker)
+ {
+ //Console.WriteLine(newNumber);
+ //Console.WriteLine(amount);
+ stack[amount] = newNumber;
+ amount++;
+ }
+ }
+ public void Pop() { }
+ public int Max() {
+ if (!(amount > 0))
+ {
+ return -1;
+ }
+ return stack.Max();
+ }
+ }
+}
